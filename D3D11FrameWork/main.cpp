@@ -1,7 +1,51 @@
+#define POLYRAM_D3D11
 #include "polyram.h"
 #include "polyram_d3d11.h"
+#include <Xinput.h>
+
+#pragma comment(lib, "XInput.lib")
 
 struct MyConstantBuffer { PRMat world, view, proj; };
+
+class Camera3D {
+private:
+	PRVec3 moveUnit;
+	float yaw, pitch, roll;
+	bool isFlyingMode;
+	PRVec3 camPos;
+
+public:
+	Camera3D() : yaw(0), pitch(0), roll(0), isFlyingMode(false) {}
+
+	void strafe(float unit) {moveUnit.x += unit;}
+	void fly(float unit) { moveUnit.y += unit; }
+	void walk(float unit) { moveUnit.z += unit; }
+	void setYaw(float unit) { yaw += unit; }
+	void setPitch(float unit) { pitch += unit; }
+	void setRoll(float unit) { roll += unit; }
+
+	void setPos(PRVec3 _camPos) { camPos = _camPos; }
+	PRVec3 getPos() { return camPos; }
+
+	void getMatrix(PRMat * result) {
+		PRVec3 tempVec;
+		PRQuat q(yaw, isFlyingMode ? pitch : 0, 0);
+		PRMat tempMat(q);
+		PRVec3::transform(&moveUnit, &tempMat, &tempVec);
+		camPos = camPos + tempVec;
+
+		q = PRQuat(yaw, pitch, roll);
+		tempMat = PRMat(q);
+
+		PRVec3 target, upVec;
+		PRVec3::transform(&PRVec3(0, 0, -1), &tempMat, &target);
+		PRVec3::transform(&PRVec3(0, 1, 0), &tempMat, &upVec);
+
+		PRVec3 t = target + camPos;
+		PRMat::createLookAtLH(&camPos, &t, &upVec, result);
+		moveUnit = PRVec3(0, 0, 0);
+	}
+};
 
 class MyScene : public PRGame {
 public:
@@ -13,6 +57,8 @@ public:
 	ID3D11Buffer * vertexCB, * pixelCB;
 	ID3D11DepthStencilState * standardDSS, *stencilDSS1, *stencilDSS2;
 	ID3D11RasterizerState * rasterizerState;
+
+	Camera3D camera;
 
 /**	ID3D11RenderTargetView * renderTarget;
 	ID3D11Texture2D * renderTargetBuffer;
@@ -30,6 +76,8 @@ public:
 	void onInitialize()
 	{
 		GETGRAPHICSCONTEXT(PRGraphicsContext_Direct3D11);	//DXGI나 장치 Context들이 모두 들어있는것.
+
+		camera.setPos(PRVec3(-1, 0, 2));
 
 		PRModelGenerator sphere(PRModelType_Sphere, PRModelProperty_Position);
 		sphereVB = PRCreateVertexBuffer(graphicsContext->d3dDevice, sphere.getData(), sphere.getDataSize());
@@ -88,6 +136,29 @@ public:
 		graphicsContext->d3dDevice->CreateDepthStencilState(&dsDesc, &stencilDSS2);
 	}
 
+	void onUpdate(double dt)
+	{
+		XINPUT_STATE xinputState;
+		if (XInputGetState(0, &xinputState) == ERROR_SUCCESS)
+		{
+			float lX = xinputState.Gamepad.sThumbLX / 32767.f;
+			float lY = xinputState.Gamepad.sThumbLY / 32767.f;
+			lX = (abs(lX) < 0.5f ? 0 : lX) * dt;
+			lY = (abs(lY) < 0.5f ? 0 : lY) * dt;
+
+			camera.walk(-lY);
+			camera.strafe(-lX);
+
+			float rX = xinputState.Gamepad.sThumbRX / 32767.f;	// 32767은 short의 최대값
+			float rY = xinputState.Gamepad.sThumbRY / 32767.f;	// 
+			rX = (abs(rX) < 0.5f ? 0 : rX) * dt;				// 데드존 설정(패드의 키가 휘어져 있을 경우를 대비하여)
+			rY = (abs(rY) < 0.5f ? 0 : rY) * dt;				// 데드존 설정
+
+			camera.setYaw(rX);
+			camera.setPitch(rY);
+		}
+	}
+
 	void onDestory()
 	{
 		stencilDSS2->Release();
@@ -118,7 +189,8 @@ public:
 		// Draw Magenta Sphere
 		MyConstantBuffer cb;
 		PRMat::createTranslate(&PRVec3(-0.5f, 0, 0), &cb.world);
-		PRMat::createLookAtLH(&PRVec3(-2, 2, -2), &PRVec3(0, 0, 0), &PRVec3(0, 1, 0), &cb.view);
+		//PRMat::createLookAtLH(&PRVec3(-2, 2, -2), &PRVec3(0, 0, 0), &PRVec3(0, 1, 0), &cb.view);
+		camera.getMatrix(&cb.view);
 		PRMat::createPerspectiveFieldOfViewLH(PR_PIover4, 1280 / 720.0f, 0.001f, 1000.0f, &cb.proj);
 		graphicsContext->immediateContext->UpdateSubresource(vertexCB, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
 		graphicsContext->immediateContext->VSSetConstantBuffers(0, 1, &vertexCB);
