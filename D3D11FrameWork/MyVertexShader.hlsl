@@ -1,13 +1,13 @@
+#pragma pack_matrix(row_major)
+
 struct VERTEX_IN
 {
 	float3 position : POSITION;
-	float2 texcoord : TEXCOORD;
 };
 
 struct VERTEX_OUT
 {
 	float4 position : SV_POSITION;
-	float2 texcoord : TEXCOORD;
 };
 
 cbuffer MyConstantBuffer : register(b0)
@@ -24,6 +24,5 @@ VERTEX_OUT main(VERTEX_IN input)
 	ret.position = mul(ret.position, world);
 	ret.position = mul(ret.position, view);
 	ret.position = mul(ret.position, proj);
-	ret.texcoord = input.texcoord;
 	return ret;
 }

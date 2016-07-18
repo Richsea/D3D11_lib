@@ -5,14 +5,13 @@ struct MyConstantBuffer { PRMat world, view, proj; };
 
 class MyScene : public PRGame {
 public:
-	ID3D11Buffer * vertexBuffer;
+	ID3D11Buffer * sphereVB, * rectVB;
+	int sphereVBSize, rectVBSize;
 	ID3D11InputLayout * inputLayout;
 	ID3D11VertexShader * vertexShader;
 	ID3D11PixelShader * pixelShader;
-	ID3D11Texture2D * texture;
-	ID3D11ShaderResourceView * textureSRV;
-	ID3D11Buffer * constantBuffer;
-	ID3D11SamplerState * samplerState;
+	ID3D11Buffer * vertexCB, * pixelCB;
+	ID3D11DepthStencilState * standardDSS, *stencilDSS1, *stencilDSS2;
 	ID3D11RasterizerState * rasterizerState;
 
 /**	ID3D11RenderTargetView * renderTarget;
@@ -22,45 +21,31 @@ public:
 	ID3D11VertexShader * renderTargetVertexShader;
 	ID3D11PixelShader * renderTargetPixelShader;
 	ID3D11InputLayout * renderTargetInputLayout;
-*/
+
 	ID3D11BlendState * alphaBlendState;
 	ID3D11BlendState * additiveBlendState;
+*/
 
 public:
 	void onInitialize()
 	{
 		GETGRAPHICSCONTEXT(PRGraphicsContext_Direct3D11);	//DXGI나 장치 Context들이 모두 들어있는것.
 
-		PRModelGenerator rect(PRModelType_Rectangle, PRModelProperty_Position | PRModelProperty_TexCoord);
-		D3D11_BUFFER_DESC vertexBufferDesc = { rect.getDataSize(), D3D11_USAGE_DEFAULT,
-			D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
-		D3D11_SUBRESOURCE_DATA vertexBufferInput = { rect.getData(), rect.getDataSize() };
-		graphicsContext->d3dDevice->CreateBuffer(&vertexBufferDesc, &vertexBufferInput, &vertexBuffer);
+		PRModelGenerator sphere(PRModelType_Sphere, PRModelProperty_Position);
+		sphereVB = PRCreateVertexBuffer(graphicsContext->d3dDevice, sphere.getData(), sphere.getDataSize());
+		sphereVBSize = sphere.getDataSize() / sizeof(PRVec3);
+
+		PRModelGenerator rect(PRModelType_Rectangle, PRModelProperty_Position);
+		rectVB = PRCreateVertexBuffer(graphicsContext->d3dDevice, rect.getData(), rect.getDataSize());
+		rectVBSize = rect.getDataSize() / sizeof(PRVec3);
 
 		D3D11_INPUT_ELEMENT_DESC inputElements[] = {
 			{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
-			{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
 		};
 		PRLoadShader(graphicsContext->d3dDevice, std::string("MyVertexShader.cso"), std::string("MyPixelShader.cso"),
 			&vertexShader, &pixelShader, inputElements, _countof(inputElements), &inputLayout);
-		texture = PRCreateTexture2D(graphicsContext->d3dDevice, std::string("test.png"));
-		graphicsContext->d3dDevice->CreateShaderResourceView(texture, nullptr, &textureSRV);
-
-		/**
-		SamplerState는 원근법 설정(가까이 오면 커지고, 멀리가면 작아진다)
-		*/
-		D3D11_SAMPLER_DESC samplerDesc;
-		memset(&samplerDesc, 0, sizeof(D3D11_SAMPLER_DESC));
-		samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;	//가로 필터링
-		samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;	//세로 필터링
-		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;	//깊이 필터링
-		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-		samplerDesc.MinLOD = -FLT_MAX;
-		samplerDesc.MaxLOD = FLT_MAX;
-		samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-		graphicsContext->d3dDevice->CreateSamplerState(&samplerDesc, &samplerState);
-
-		constantBuffer = PRCreateConstantBuffer<MyConstantBuffer>(graphicsContext->d3dDevice);
+		vertexCB = PRCreateConstantBuffer<MyConstantBuffer>(graphicsContext -> d3dDevice);
+		pixelCB = PRCreateConstantBuffer<PRVec4>(graphicsContext->d3dDevice);
 
 		D3D11_RASTERIZER_DESC rasterizerDesc;
 		memset(&rasterizerDesc, 0, sizeof(D3D11_RASTERIZER_DESC));
@@ -69,45 +54,50 @@ public:
 		rasterizerDesc.DepthClipEnable = false;
 		graphicsContext->d3dDevice->CreateRasterizerState(&rasterizerDesc, &rasterizerState);
 
-		D3D11_BLEND_DESC blendDesc;
-		memset(&blendDesc, 0, sizeof(D3D11_BLEND_DESC));
-		blendDesc.RenderTarget[0].BlendEnable = true;
-		blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_COLOR;
-		blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_COLOR;
-		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
-		blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-		blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-		graphicsContext->d3dDevice->CreateBlendState(&blendDesc, &alphaBlendState);
+		D3D11_DEPTH_STENCIL_DESC dsDesc = { 0, };
+		dsDesc.DepthEnable = true;
+		dsDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		graphicsContext->d3dDevice->CreateDepthStencilState(&dsDesc, &standardDSS);
 
-		memset(&blendDesc, 0, sizeof(D3D11_BLEND_DESC));
-		blendDesc.RenderTarget[0].BlendEnable = true;
-		blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-		blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
-		blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
-		blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-		blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-		graphicsContext->d3dDevice->CreateBlendState(&blendDesc, &additiveBlendState);
+		memset(&dsDesc, 0, sizeof(D3D11_DEPTH_STENCIL_DESC));
+		dsDesc.DepthEnable = true;
+		dsDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		dsDesc.StencilEnable = true;
+		dsDesc.StencilReadMask = 0xffffffff;
+		dsDesc.StencilWriteMask = 0xffffffff;
+		dsDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+		dsDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_REPLACE;
+		dsDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+		dsDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+		memcpy(&dsDesc.BackFace, &dsDesc.FrontFace, sizeof(D3D11_DEPTH_STENCILOP_DESC));
+		graphicsContext->d3dDevice->CreateDepthStencilState(&dsDesc, &stencilDSS1);
+		memset(&dsDesc, 0, sizeof(D3D11_DEPTH_STENCIL_DESC));
+		dsDesc.DepthEnable = false;
+		dsDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+		dsDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+		dsDesc.StencilEnable = true;
+		dsDesc.StencilReadMask = 0xffffffff;
+		dsDesc.StencilWriteMask = 0xffffffff;
+		dsDesc.FrontFace.StencilFunc = D3D11_COMPARISON_EQUAL;
+		dsDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+		dsDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+		dsDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+		memcpy(&dsDesc.BackFace, &dsDesc.FrontFace, sizeof(D3D11_DEPTH_STENCILOP_DESC));
+		graphicsContext->d3dDevice->CreateDepthStencilState(&dsDesc, &stencilDSS2);
 	}
 
 	void onDestory()
 	{
-		additiveBlendState->Release();
-		alphaBlendState->Release();
-
+		stencilDSS2->Release();
+		stencilDSS1->Release();
+		standardDSS->Release();
 		rasterizerState->Release();
-		samplerState->Release();
-		constantBuffer->Release();
-		textureSRV->Release();
-		texture->Release();
-		pixelShader->Release();
+		pixelCB->Release();
 		vertexShader->Release();
 		inputLayout->Release();
-		vertexBuffer->Release();
-				
+		sphereVB->Release();		
 	}
 
 	void onDraw(double dt)
@@ -115,41 +105,53 @@ public:
 		GETGRAPHICSCONTEXT(PRGraphicsContext_Direct3D11);
 
 		float clearColor[] = { 0, 0, 0, 1 };
-		graphicsContext->immediateContext->OMSetRenderTargets(1, &graphicsContext->renderTargetView, nullptr);	//블랜드 효과 적용
 		graphicsContext->immediateContext->ClearRenderTargetView(graphicsContext->renderTargetView, clearColor);
 		graphicsContext->immediateContext->ClearDepthStencilView(graphicsContext->depthStencilView, D3D11_CLEAR_DEPTH, 1, 0);
 
-		graphicsContext->immediateContext->OMSetBlendState(alphaBlendState, nullptr, 0xffffffff);
+		graphicsContext->immediateContext->VSSetShader(vertexShader, nullptr, 0);
+		graphicsContext->immediateContext->PSSetShader(pixelShader, nullptr, 0);
+		graphicsContext->immediateContext->RSSetState(rasterizerState);
 
-		unsigned stride = sizeof(PRVec3) + sizeof(PRVec2), offset = 0;
-		graphicsContext->immediateContext->IASetVertexBuffers(0, 1, &vertexBuffer, &stride, &offset);
 		graphicsContext->immediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		graphicsContext->immediateContext->IASetInputLayout(inputLayout);
 
-		graphicsContext->immediateContext->VSSetShader(vertexShader, nullptr, 0);
-		graphicsContext->immediateContext->PSSetShader(pixelShader, nullptr, 0);
-
-		graphicsContext->immediateContext->RSSetState(rasterizerState);
-
+		// Draw Magenta Sphere
 		MyConstantBuffer cb;
-		PRMat::createTranslate(&PRVec3(-0.25f, 0, 0), &cb.world);
-		PRMat::createLookAtLH(&PRVec3(0, 0, -2), &PRVec3(0, 0, 0), &PRVec3(0, 1, 0), &cb.view);
+		PRMat::createTranslate(&PRVec3(-0.5f, 0, 0), &cb.world);
+		PRMat::createLookAtLH(&PRVec3(-2, 2, -2), &PRVec3(0, 0, 0), &PRVec3(0, 1, 0), &cb.view);
 		PRMat::createPerspectiveFieldOfViewLH(PR_PIover4, 1280 / 720.0f, 0.001f, 1000.0f, &cb.proj);
-		cb.world = cb.world.transpose();
-		cb.view = cb.view.transpose();
-		cb.proj = cb.proj.transpose();
-		graphicsContext->immediateContext->UpdateSubresource(constantBuffer, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
-		graphicsContext->immediateContext->VSSetConstantBuffers(0, 1, &constantBuffer);
-		graphicsContext->immediateContext->PSSetShaderResources(0, 1, &textureSRV);
-		graphicsContext->immediateContext->PSSetSamplers(0, 1, &samplerState);	//sample : 색상
+		graphicsContext->immediateContext->UpdateSubresource(vertexCB, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
+		graphicsContext->immediateContext->VSSetConstantBuffers(0, 1, &vertexCB);
+		graphicsContext->immediateContext->UpdateSubresource(pixelCB, 0, nullptr, &PRVec4(1, 0, 1, 1), sizeof(PRVec4), 0);
+		graphicsContext->immediateContext->PSSetConstantBuffers(0, 1, &pixelCB);
 
-		graphicsContext->immediateContext->Draw(6, 0);
+		unsigned stride = sizeof(PRVec3), offset = 0;
+		graphicsContext->immediateContext->IASetVertexBuffers(0, 1, &sphereVB, &stride, &offset);
+		
+		graphicsContext->immediateContext->OMSetDepthStencilState(standardDSS, 0x1);
+		graphicsContext->immediateContext->Draw(sphereVBSize, 0);
 
-		PRMat::createTranslate(&PRVec3(0.25f, 0, 0), &cb.world);
-		cb.world = cb.world.transpose();
-		graphicsContext->immediateContext->UpdateSubresource(constantBuffer, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
+		// Draw White Sphere with Stencil Comparison
+		PRMat::createRotationY(PRToRadian(90), &cb.world);
+		graphicsContext->immediateContext->UpdateSubresource(vertexCB, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
+		graphicsContext->immediateContext->UpdateSubresource(pixelCB, 0, nullptr, &PRVec4(0.7f, 0.7f, 0.7f, 0.7f), sizeof(PRVec4), 0);
 
-		graphicsContext->immediateContext->Draw(6, 0);
+		graphicsContext->immediateContext->IASetVertexBuffers(0, 1, &rectVB, &stride, &offset);
+
+		graphicsContext->immediateContext->ClearDepthStencilView(graphicsContext->depthStencilView, D3D11_CLEAR_STENCIL, 1, 0);
+		graphicsContext->immediateContext->OMSetDepthStencilState(stencilDSS1, 0x1);
+		graphicsContext->immediateContext->Draw(rectVBSize, 0);
+
+		// Draw white Sphere with Stencil Comparison
+		PRMat::createTranslate(&PRVec3(0.5f, 0, 0), &cb.world);
+		graphicsContext->immediateContext->UpdateSubresource(vertexCB, 0, nullptr, &cb, sizeof(MyConstantBuffer), 0);
+		graphicsContext->immediateContext->UpdateSubresource(pixelCB, 0, nullptr, &PRVec4(1, 1, 1, 1), sizeof(PRVec4), 0);
+
+		graphicsContext->immediateContext->IASetVertexBuffers(0, 1, &sphereVB, &stride, &offset);
+
+		graphicsContext->immediateContext->OMSetDepthStencilState(stencilDSS2, 0x1);
+		graphicsContext->immediateContext->Draw(sphereVBSize, 0);
+
 		graphicsContext->dxgiSwapChain->Present(0, 0);
 	}
 };

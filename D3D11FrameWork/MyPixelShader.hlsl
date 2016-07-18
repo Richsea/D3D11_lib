@@ -1,15 +1,16 @@
 struct PIXEL_IN
 {
 	float4 position : SV_POSITION;
-	float2 texcoord : TEXCOORD;
 };
 
-Texture2D mySampler;
-SamplerState samplerState;	
+cbuffer Color
+{
+	float4 color;
+};
 
 float4 main(PIXEL_IN input) : SV_TARGET
 {
 
-	return mySampler.Sample(samplerState, input.texcoord)*float4(1, 1, 1, 0.5f);
+	return color;
 
 }	
