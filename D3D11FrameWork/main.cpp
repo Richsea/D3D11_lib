@@ -156,6 +156,13 @@ public:
 
 			camera.setYaw(rX);
 			camera.setPitch(rY);
+
+			float BA = xinputState.Gamepad.wButtons;
+			if (BA == 4096)
+			{
+				sin(abs(BA)) * dt;
+
+			}
 		}
 	}
 
