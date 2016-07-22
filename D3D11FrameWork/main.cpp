@@ -51,6 +51,8 @@ class MyScene : public PRGame {
 public:
 	ID3D11Buffer * sphereVB, * rectVB;
 	int sphereVBSize, rectVBSize;
+	int situation = 0;
+	int limit = 0;
 	ID3D11InputLayout * inputLayout;
 	ID3D11VertexShader * vertexShader;
 	ID3D11PixelShader * pixelShader;
@@ -158,10 +160,28 @@ public:
 			camera.setPitch(rY);
 
 			float BA = xinputState.Gamepad.wButtons;
+			
 			if (BA == 4096)
 			{
-				sin(abs(BA)) * dt;
+				situation = 1;
+			}
 
+			switch (situation)
+			{
+			case 1:
+				camera.fly(-0.01);
+				limit += 0.01;
+
+				if (limit <= 0.1)
+					situation = 2;
+				break;
+			case 2:
+				camera.fly(0.01);
+				limit -= 0.01;
+
+				if (limit >= 0)
+					situation = 0;
+				break;
 			}
 		}
 	}
